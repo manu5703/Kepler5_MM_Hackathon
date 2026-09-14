@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
+import GenSlot from "../gen/GenSlot";
 
 const CONCEPTS = [
   { id: "arrays", label: "Arrays & Big-O", x: 80, y: 140, prereqs: [], week: 1, covers: "Indexing, memory layout, time and space complexity analysis.", industry: "Foundation for every coding interview. Tested in 90% of technical screens.", research: "Core to algorithm analysis and computational complexity theory.", interviewQ: "Given an unsorted array, find two numbers that sum to a target in O(n) time.", researchQ: "How does cache-line alignment in arrays affect real-world vs theoretical time complexity?", estTime: "3h", assmt: "Assignment 1, Midterm, Final" },
@@ -211,7 +212,7 @@ function TargetScreen({ onNext }) {
 }
 
 // ─── KNOWLEDGE GRAPH (SVG) ──────────────
-function KnowledgeGraph({ mastery, target, onSelectNode, selectedNode }) {
+function KnowledgeGraph({ mastery, target, onSelectNode, selectedNode, pulseNode }) {
   let visible = ["arrays", "linkedlists", "recursion", "stacks", "trees"];
   if (target === "mid" || target === "final") visible.push("bst", "sorting");
   if (target === "final") visible.push("graphs", "dp");
@@ -237,8 +238,14 @@ function KnowledgeGraph({ mastery, target, onSelectNode, selectedNode }) {
       {nodes.map(n => {
         const m = MASTERY[mastery[n.id]] || MASTERY.locked;
         const isSel = selectedNode === n.id;
+        const isPulse = pulseNode === n.id;
         return (
           <g key={n.id} onClick={() => mastery[n.id] !== "locked" && onSelectNode(n.id)} style={{ cursor: mastery[n.id] === "locked" ? "default" : "pointer" }}>
+            {isPulse && (
+              <rect x={n.x * scale - 56} y={n.y * scale - 22} width={112} height={44} rx={8} fill="none" stroke="#EF9F27" strokeWidth={2}>
+                <animate attributeName="opacity" values="1;0.15;1" dur="1.1s" repeatCount="3" />
+              </rect>
+            )}
             <rect x={n.x * scale - 56} y={n.y * scale - 22} width={112} height={44} rx={8} fill={m.bg} stroke={isSel ? m.color : "transparent"} strokeWidth={isSel ? 2.5 : 0} opacity={mastery[n.id] === "locked" ? 0.45 : 1} />
             <text x={n.x * scale} y={n.y * scale - 2} textAnchor="middle" fontSize={12} fontWeight={500} fill={mastery[n.id] === "locked" ? "#aaa" : "#333"} style={{ pointerEvents: "none" }}>{n.label}</text>
             <text x={n.x * scale} y={n.y * scale + 14} textAnchor="middle" fontSize={10} fill={m.color} style={{ pointerEvents: "none" }}>{m.label}</text>
@@ -279,14 +286,28 @@ function ConceptPanel({ concept, mastery, direction, onStartLearning, onClose })
 }
 
 // ─── LEARNING SCREEN ────────────────────
-function LearningScreen({ concept, direction, onComplete, onBack }) {
+// The two live gen-UI seams (PROTOTYPE_PLAN.md §1) live here:
+//   - "teach" phase: "Explain this differently" button -> explain_differently
+//     trigger, no wrong answer (spec scenario 6's pattern).
+//   - "probe" phase: submitting a free-text answer -> wrong_answer trigger,
+//     the student's own words stand in for the spec's hardcoded wrong answers.
+// The "career" phase's placeholder is left as static text — the plan scoped
+// it as a stretch goal, not wired in this pass.
+function LearningScreen({ concept, direction, onComplete, onBack, onPrereqGap }) {
   const c = CONCEPTS.find(n => n.id === concept);
   const [phase, setPhase] = useState("teach");
   const [probeAnswer, setProbeAnswer] = useState("");
   const [showResult, setShowResult] = useState(false);
   const [showIndustry, setShowIndustry] = useState(false);
+  const [teachTrigger, setTeachTrigger] = useState(null);
+  const [probeTrigger, setProbeTrigger] = useState(null);
 
   if (!c) return null;
+
+  function submitProbeAnswer() {
+    setShowResult(true);
+    setProbeTrigger({ conceptId: c.id, triggerType: "wrong_answer", studentAnswer: probeAnswer });
+  }
 
   return (
     <div style={{ maxWidth: 500, margin: "0 auto", padding: "1.5rem" }}>
@@ -310,10 +331,20 @@ function LearningScreen({ concept, direction, onComplete, onBack }) {
             <div style={{ fontWeight: 500, marginBottom: 6, color: "#333" }}>Why this matters</div>
             <div style={{ color: "#555" }}>{direction === "research" ? c.research : c.industry}</div>
           </div>
-          <div style={{ background: "#f5f3ff", borderRadius: 10, padding: "14px 16px", fontSize: 14, lineHeight: 1.7 }}>
-            <div style={{ fontWeight: 500, marginBottom: 6, color: "#534AB7" }}>Key insight</div>
-            <div style={{ color: "#555" }}>The tutor would teach this concept step-by-step here — with explanations, code, visuals, and examples adapted to your learning style. This is a focused learning module, not a chatbot.</div>
-          </div>
+          {!teachTrigger ? (
+            <div style={{ background: "#f5f3ff", borderRadius: 10, padding: "14px 16px", fontSize: 14, lineHeight: 1.7 }}>
+              <div style={{ fontWeight: 500, marginBottom: 6, color: "#534AB7" }}>Not clicking yet?</div>
+              <div style={{ color: "#555", marginBottom: 10 }}>Tap below for a generated check on this concept — grounded in the course material, not a canned example.</div>
+              <Button
+                small
+                onClick={() => setTeachTrigger({ conceptId: c.id, triggerType: "explain_differently", studentAnswer: null })}
+              >
+                Explain this differently
+              </Button>
+            </div>
+          ) : (
+            <GenSlot trigger={teachTrigger} />
+          )}
           <Button primary onClick={() => setPhase("probe")} style={{ marginTop: 8 }}>I've got it — check my understanding</Button>
         </div>
       )}
@@ -326,12 +357,11 @@ function LearningScreen({ concept, direction, onComplete, onBack }) {
           </div>
           <textarea value={probeAnswer} onChange={e => setProbeAnswer(e.target.value)} placeholder="Type your answer..." rows={4} style={{ width: "100%", padding: "12px 14px", borderRadius: 8, border: "0.5px solid #ccc", fontSize: 15, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }} />
           {!showResult ? (
-            <Button primary disabled={!probeAnswer.trim()} onClick={() => setShowResult(true)}>Submit answer</Button>
+            <Button primary disabled={!probeAnswer.trim()} onClick={submitProbeAnswer}>Submit answer</Button>
           ) : (
             <div>
-              <div style={{ background: "#E1F5EE", borderRadius: 10, padding: "14px 16px", fontSize: 14, lineHeight: 1.7, marginBottom: 12 }}>
-                <div style={{ fontWeight: 500, marginBottom: 4, color: "#0F6E56" }}>Feedback</div>
-                <div style={{ color: "#085041" }}>The AI tutor evaluates your answer here — identifying what you got right, what's missing, and any misconceptions. If there's a gap, it addresses the specific misunderstanding before marking the concept.</div>
+              <div style={{ marginBottom: 12 }}>
+                <GenSlot trigger={probeTrigger} onGrounded={onPrereqGap} />
               </div>
               <Button primary onClick={() => setPhase("career")} style={{ width: "100%" }}>
                 Continue to {direction === "research" ? "research depth" : "interview prep"}
@@ -374,6 +404,7 @@ function LearningScreen({ concept, direction, onComplete, onBack }) {
 function Dashboard({ direction, target, mastery, setMastery, onChangeTarget }) {
   const [selectedNode, setSelectedNode] = useState(null);
   const [learning, setLearning] = useState(null);
+  const [pulseNode, setPulseNode] = useState(null);
 
   const totalVisible = target === "final" ? 9 : target === "mid" ? 7 : 5;
   const masteredCount = Object.values(mastery).filter(v => v === "mastered").length;
@@ -393,7 +424,20 @@ function Dashboard({ direction, target, mastery, setMastery, onChangeTarget }) {
   }
 
   if (learning) {
-    return <LearningScreen concept={learning} direction={direction} onComplete={() => handleComplete(learning)} onBack={() => setLearning(null)} />;
+    return (
+      <LearningScreen
+        concept={learning}
+        direction={direction}
+        onComplete={() => handleComplete(learning)}
+        onBack={() => setLearning(null)}
+        onPrereqGap={(prereqId) => {
+          // See PROTOTYPE_PLAN.md §1 — when a diagnosis names a prereq gap,
+          // pulse that node on the graph once the student is back on it.
+          setPulseNode(prereqId);
+          setTimeout(() => setPulseNode(null), 3500);
+        }}
+      />
+    );
   }
 
   const targetLabels = { a2: "Assignment 2 — Friday", mid: "Midterm — Oct 15", final: "Final — Dec 12" };
@@ -434,7 +478,7 @@ function Dashboard({ direction, target, mastery, setMastery, onChangeTarget }) {
       </div>
 
       <div style={{ border: "0.5px solid #eee", borderRadius: 12, padding: "12px 8px", background: "#fefefe" }}>
-        <KnowledgeGraph mastery={mastery} target={target} onSelectNode={setSelectedNode} selectedNode={selectedNode} />
+        <KnowledgeGraph mastery={mastery} target={target} onSelectNode={setSelectedNode} selectedNode={selectedNode} pulseNode={pulseNode} />
       </div>
 
       {selectedNode && (
@@ -448,8 +492,8 @@ function Dashboard({ direction, target, mastery, setMastery, onChangeTarget }) {
   );
 }
 
-// ─── APP ROOT ───────────────────────────
-export default function App() {
+// ─── PORTAL ROOT ────────────────────────
+export default function Portal() {
   const [screen, setScreen] = useState("landing");
   const [direction, setDirection] = useState("industry");
   const [target, setTarget] = useState("mid");
