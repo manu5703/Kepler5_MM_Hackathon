@@ -1,0 +1,18 @@
+# No database service — this prototype is explicitly out-of-scope for
+# persistence beyond run logs (PROTOTYPE_PLAN.md §9). `runs/` is a bind
+# mount so runs.jsonl (and test-log.md, generated on the host via
+# `npm run report`) survive container restarts and stay readable without
+# `docker exec`. Add a db service here if a later pass needs one — it isn't
+# needed for the generate -> validate -> render loop this prototype tests.
+services:
+  app:
+    build: .
+    ports:
+      - "8787:8787"
+    env_file:
+      - .env
+    environment:
+      - PORT=8787
+    volumes:
+      - ./runs:/app/runs
+    restart: unless-stopped
